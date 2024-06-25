@@ -1,0 +1,72 @@
+/*Implementacion de MiddleWare de Registro de Solicitudes y Respuestas*/
+
+public class RequestResponseLoggingMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly ILogger<RequestResponseLoggingMiddleware> _logger;
+
+    public RequestResponseLoggingMiddleware(RequestDelegate next, ILogger<RequestResponseLoggingMiddleware> logger)
+    {
+        _next = next;
+        _logger = logger;
+    }
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var request = context.Request;
+        var ipAddress = context.Connection.RemoteIpAddress?.ToString();
+        var url = request.Path;
+        var method = request.Method;
+        var userAgent = request.Headers["User-Agent"].ToString();
+
+        // Log the request details
+        _logger.LogInformation($"Incoming request: IP={ipAddress}, URL={url}, Method={method}, UserAgent={userAgent}");
+
+        // Copy a pointer to the original response body stream
+        var originalBodyStream = context.Response.Body;
+
+        using (var responseBody = new MemoryStream())
+        {
+            context.Response.Body = responseBody;
+
+            await _next(context);
+
+            var statusCode = context.Response.StatusCode;
+
+            // Log the response details
+            _logger.LogInformation($"Outgoing response: StatusCode={statusCode}");
+
+            // Copy the contents of the new memory stream (which contains the response) to the original stream
+            await responseBody.CopyToAsync(originalBodyStream);
+        }
+    }
+}
+/* Agregar el middleware de la aplicación*/
+
+public class Startup
+{
+    public void ConfigureServices(IServiceCollection services)
+    {
+        // Configura los servicios de logging, por ejemplo usando Serilog
+        services.AddLogging(loggingBuilder =>
+        {
+            loggingBuilder.AddSerilog(dispose: true);
+        });
+
+        // Otros servicios
+    }
+
+    public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+    {
+        // Otros middlewares
+        app.UseMiddleware<RequestResponseLoggingMiddleware>();
+
+        app.UseRouting();
+        app.UseEndpoints(endpoints =>
+        {
+            endpoints.MapControllers();
+        });
+    }
+}
+
+
