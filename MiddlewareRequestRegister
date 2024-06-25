@@ -41,7 +41,7 @@ public class RequestResponseLoggingMiddleware
         }
     }
 }
-/* Agregar el middleware de la aplicación*/
+
 
 public class Startup
 {
