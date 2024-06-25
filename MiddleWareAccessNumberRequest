@@ -1,0 +1,69 @@
+/*Implementacion de Limitacion Tasa de Solicitudes */
+/**/
+public class RateLimitingMiddleware
+{
+    private readonly RequestDelegate _next;
+    private static readonly Dictionary<string, RequestData> _requests = new();
+    private static readonly object _lock = new();
+    private readonly int _maxRequests;
+    private readonly TimeSpan _requestPeriod;
+    private readonly TimeSpan _blockDuration;
+
+    public RateLimitingMiddleware(RequestDelegate next, int maxRequests, TimeSpan requestPeriod, TimeSpan blockDuration)
+    {
+        _next = next;
+        _maxRequests = maxRequests;
+        _requestPeriod = requestPeriod;
+        _blockDuration = blockDuration;
+    }
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var ipAddress = context.Connection.RemoteIpAddress?.ToString();
+        if (string.IsNullOrEmpty(ipAddress))
+        {
+            await _next(context);
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (_requests.TryGetValue(ipAddress, out var requestData))
+            {
+                if (requestData.BlockedUntil > DateTime.UtcNow)
+                {
+                    context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    return;
+                }
+
+                if (requestData.Requests.Count >= _maxRequests)
+                {
+                    var firstRequestTime = requestData.Requests.First();
+                    if (DateTime.UtcNow - firstRequestTime < _requestPeriod)
+                    {
+                        requestData.BlockedUntil = DateTime.UtcNow.Add(_blockDuration);
+                        context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                        return;
+                    }
+
+                    requestData.Requests.RemoveAt(0);
+                }
+                requestData.Requests.Add(DateTime.UtcNow);
+            }
+            else
+            {
+                _requests[ipAddress] = new RequestData { Requests = new List<DateTime> { DateTime.UtcNow } };
+            }
+        }
+
+        await _next(context);
+    }
+
+    private class RequestData
+    {
+        public List<DateTime> Requests { get; set; }
+        public DateTime BlockedUntil { get; set; } = DateTime.MinValue;
+    }
+}
+
+/*Integracion del Middle Ware a la aplicación */
